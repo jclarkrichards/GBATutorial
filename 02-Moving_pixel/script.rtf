@@ -1,0 +1,112 @@
+{\rtf1\ansi\ansicpg1252\deff0\nouicompat\deflang1033{\fonttbl{\f0\fnil\fcharset0 Calibri;}}
+{\*\generator Riched20 10.0.19041}\viewkind4\uc1 
+\pard\sa200\sl276\slmult1\f0\fs22\lang9 Moving Pixel\par
+In this video I am going to show you how to move a pixel around on the Gameboy Advance screen.  If you're following along from the previous video, then you should be able to display a red pixel, or a pixel of any color, on the screen.  If you haven't seen the previous video, then I suggest you go check that out first so we're all on the same page.\par
+As you can see I have the previous code up on the screen that we wrote in the previous video.  This code just displays a red pixel in the upper left corner of the screen.  In order to get the pixel to move around the screen we are going to have to modify this fairly heavily.  We'll also make it a bit more readable.\par
+Before we add anything new, let's make this code more readable.  We'll do that by adding in some defines at the top of the file.  Defines allow us to rename things, for example, we are going to be using 'unsigned short' a lot.  A variable of type short is 2 bytes or 16 bits.  It might make more sense for us to rename it something like 'u16' so that we can more easily see that the variable in question is an unsigned 16 bit variable.  So we can create the define like so:\par
+\b #define u16 unsigned short\par
+\b0 Remember that defines don't end in a semicolon.  We'll also be using 'volatile unsigned short' a lot, so lets shorten that to 'vu16'.\par
+\b #define vu16 volatile u16\par
+\b0 Now anywhere we need to define a variable of time unsigned short or volatile unsigned short we can use u16 and vu16 respectivley.  \par
+Another good thing to do is define a name for the various memory blocks that we use often.  For example, we know from the previous video that the memory block that starts at 0x0400:0000 is reserved for all of the I/O control registers like the display register.  But I think it's better to assign some sort of name to it like IOMEM or MEM_IO for 'Input/Output memory'.\par
+\b #define MEM_IO 0x04000000\par
+\b0 While we are at it we can do the same for the VRAM memory\par
+\b #define MEM_VRAM 0x06000000\par
+\b0 To make things a bit more readable, I like to align things with tabs like so (tab out the values).\par
+We can (and should) make defines for the individual registers within the IO memory.  The only register we've so far come across is the display register, and we learned that that's actually the first register in this memory block.  So we can define the display register as such:\par
+\b #define REG_DISP *(vu16*)MEM_IO\par
+\b0 So now let's look at our main function.  We can now replace the first line with \par
+\b REG_DISP = 0x0403;\par
+\b0 We can do something for the VRAM.  Lets define something called VRAM16 as such:\par
+\b #define VRAM16 (vu16*)MEM_VRAM\par
+\b0 Now wait a second, why aren't we dereferencing this if we're planning on storing things at this memory location.  That's a good question and it will be better answered later, right now we just want a pointer that points to the first location in VRAM.\par
+With all of these changes that we made, we haven't done anything new to the program in how it works.  If you compile this again you'll see that we still have a single red pixel in the upper left corner of the screen.  We added more lines to make it more readable and a bit more organized.  It's not perfect, and your code never will be, but it's good for now.\par
+\par
+Now we need to focus on making this little pixel move.  To do that we want to use the directional keys on the Gameboy Advance naturally.  So we want to be able to move the pixel up, down, left, and right.  To do that we first need to be aware of another register in the IO memory block.  This 2 byte register is at location 0x0130 in the IO Memory.  So it's full memory address is 0x0400:0130.  This register keeps track of which buttons are being pressed at any one time.  If you go and count up all of the buttons on the Gameboy advance, you'll find that there are 10 buttons.  So in this 16 bit register we can assign a bit for each button and then have 6 unused bits.  The way the bits are mapped to the buttons are as follows:\par
+x x x x  x x L R  DOWN UP LEFT RIGHT  start select B A\par
+This register, unlike the display register, is read-only.  We don't write anything to this register, we only read from it which is fine.  You may think that all of the values are 0 until a button is pressed changing the value to 1.  It's actually the opposite.  If a button is not being pressed down then the value of that bit is 1.  When a button is pressed down that value changes to 0.  It's the opposite of what you would expect, but that's fine.  Let's go ahead and define this register like we did with the display register.\par
+#define REG_KEY *(vu16*)(MEM_IO + 0x0130)\par
+We can now read this register whenever we want, but how do we read it?  Basically, how do we ask, "Hey, is the UP key being pressed down yet?", for example?  We can do that with a mask.  We know what the normal value of this register is.  If no keys are being pressed, then the register looks like this:\par
+0000 0011 1111 1111 = 0x03FF\par
+This is the default state.  So let's store that value in a define:\par
+#define KEYMASK 0x03FF\par
+This is the default value of the register.  Now, if we press the UP key the register is going to change to the following:\par
+0000 0011 1011 1111 = 0x03BF\par
+The bad thing is this value will change if other keys are being pressed along with the UP key so instead of storing this value and all possible values where the up key is being pressed, let's do something a bit smarter.  We can use a mask to isolate the UP key to see if it is being pressed or not.  First we're going to flip the bits in the REG_KEY so that when the buttons are NOT being pressed, then the values of those bits are 0 instead of 1.  Once we flip those bits we can do a bitwise and operation to check with the UP key mask.  \par
+~REG_KEY & UPMASK\par
+We haven't defined the UPMASK yet, so let's do that.  \par
+0000 0000 0100 0000 = 0x0040\par
+#define UPMASK 0x0400\par
+So let's say that the UP key is not being pressed, then saying ~REG_KEY & UPMASK will get us the following:\par
+xxxx x0xx xxxx xxxx & 0000 0000 0100 0000 = 0x0000 = 0\par
+I'm using an 'x' to refer to values that don't matter.  It doesn't matter if other keys are being pressed or not.  All we care about is whether the UP key is being pressed or not.  In this case it's not so we get a value of 0.\par
+Now if UP is being pressed then the following happens:\par
+xxxx x1xx xxxx xxxx  & 0000 0000 0100 0000 = 0x0010 = !0\par
+What happens is that we get something that's not 0, we actually just get the value of the UPMASK back.  But we can just check that it's not 0.  So we can now say something like the following:\par
+if(~REG_KEY & UPMASK) \{ move pixel up\}\par
+Remember that 0 also means false and any value not zero means true in an if statement.  Now we can detect when a key is being pressed and which key.  So let's add this in our game loop.  Remember that the while(1); is our game loop which is currently empty.  So change it to the following:\par
+\par
+while(1) \{\par
+if(~REG_KEY & UPMASK) \{\}\par
+else if(~REG_KEY & DOWNMASK) \{\}\par
+if(~REG_KEY & LEFTMASK) \{\}\par
+else if(~REG_KEY & RIGHTMASK) \{\}\par
+\}\par
+\par
+We need to define the masks above:\par
+#define RIGHTMASK 0x0010\par
+#define LEFTMASK 0x0020\par
+#define UPMASK 0x0040\par
+#define DOWNMASK 0x0080\par
+We can now detect when each key is being pressed, now we need to tell the pixel to move based on that key press.  To do that we just need to keep track of the pixels x and y position on the screen.  When we press up we'll move him up 1 pixel and when we press rigth we'll move him right 1 pixel.  Remember to move up we have to decrease the y position by 1.  So we'll define x and y variables:\par
+int x = 0;\par
+int y = 0;\par
+Then we'll modify the if statements to increase or decrease these variables by 1.\par
+if(~REG_KEY & UPMASK) \par
+\tab\tab\{\par
+\tab\tab\tab y--;\par
+\tab\tab\}\par
+\tab\tab else if(~REG_KEY & DOWNMASK) \par
+\tab\tab\{\par
+\tab\tab\tab y++;\par
+\tab\tab\}\par
+\tab\tab\par
+\tab\tab if(~REG_KEY & LEFTMASK) \par
+\tab\tab\{\par
+\tab\tab\tab x--;\par
+\tab\tab\}\par
+\tab\tab else if(~REG_KEY & RIGHTMASK) \par
+\tab\tab\{\par
+\tab\tab\tab x++;\par
+\tab\tab\}\par
+\par
+That's all well and good, and if you compile and run this program on a GBA, then nothing still happens.  Press the keys all you want and the pixel still won't move.  Why not?  The x and y values are being modified when the buttons are being pressed, but now we actually need to draw the pixel at those locations.  Look at this line:\par
+*VRAM16  = 0x001F;\par
+Remember that this simply says to assign the value of 0x001F (which is a red color) to the memory VRAM16 is pointing.  Right now it's pointing at 0x0600:0000 which is the upper left of the screen.  So we need to change where this pointer is pointing to in the VRAM memory and then draw a red pixel there.  To do that we're going to have to define the vram pointer a bit differently:\par
+vu16 *vram = VRAM16;\par
+So now we're defining an actual pointer, which at the moment still points to the upper left of the screen.  To change where that pointer points we can use the following:\par
+vram[x + y*WIDTH]\par
+This formula is a general formula for mapping a 2d array onto a 1d array.  The WIDTH is the screen width which is of course 240 pixels.  Since that doesn't change we can define it as a constant:\par
+\b const int WIDTH = 240;\par
+cont int HEIGHT = 160;\par
+\b0 You can use a define as well, but this works.  Notice I also included the height of the screen as well.\par
+Now given any x, y point we can color any pixel red.  Place the following at the end of the while loop:\par
+\b vram[x + y*WIDTH] = 0x001F;\par
+\b0\par
+Now, surely if we compile and start the program the pixel will move, right?  Well, yes.  But it probably won't be what you would expect.  Press the down key and you may see a red light magically appear.  \par
+We need to understand how the GBA screen updates.  It's usually not a good idea to try and draw things to the screen while the screen is being updated.  But how do we know when the screen is being updated?  Well, there's a register for that. \par
+0x0400:0006\par
+This register is known as the vertical count register.  What it does is just tell you the current scanline being updated at any point in time.  That's pretty nice, right?  The GBA screen has 160 scanlines since it has a height of 160 pixels.  Let's create a define for it:\par
+\b #define REG_VCOUNT *(vu16*)(MEM_IO + 0x0006)\par
+\b0 A question you may ask yourself now is, "How often does the screen refresh?"  What is the refresh rate of the GBA screen?  We can do that with some simple math.  Each pixel takes 2.38 e-7 seconds to update.  Ok, so you're thinking all we need to do is multiply that by the totoal number of pixels right?  2.38e-7 * 240 * 160 = .00914 seconds or ~109 frames per second.  That seems wrong, because it is.  We're not taking a couple of things into account.  First, the time it takes for a scanline to reset to the next line, and second the time it takes for the scanline to reset to the top left corner of the screen.  See, the scanline starts in the top left corner and moves horizontally to the end of the screen.  That's 240 pixels.  But then it has to reset to the start of the next line, and that takes time.  The time it takes to reset to the next line is called the horizontal blank or HBLANK for short.  The time for the line to reset is equivalent to the time to scan 68 pixels.  Then when the scan scans the last pixel in the lower right corner, it has to reset back to the top left corner of the screen.  This takes the most time and is know as the Vertical Blank or VBLANK.  The time this takes is equivalent to saying there's 68 more scanlines to scan.  So the actual refresh rate is:\par
+2.38e-7 * (240 + 68) * ( 160 * 68) = .0167 seconds or 59.83 frames per second.  \par
+That's nearly 60 frames per second.  So not bad.\par
+So what does all of this mean?  We only want to update the pixel's position during the VBLANK.  So when we're in the game loop we need to wait until we're in VBLANK, then we do all of our updating, then the results will be shown in the next screen update.  So the first 2 lines of our while loop need to be:\par
+while(REG_VCOUNT >= HEIGHT);\par
+while(REG_VCOUNT < HEIGHT);\par
+So what are we doing here?  The first line basically says, "If we're already somewhere in the middle of a VBLANK, then wait until we start drawing again."  Then the next line says, "Wait until the next VBLANK."  These two lines ensure that anything we do after this will start on a VBLANK.  There is actually a better way, but this is good for now and it works.\par
+Try compiling and starting the "game" now.  Then press on a directional button to move the pixel around the screen.  You'll notice something very interesting.  Not only are you moving the pixel around the screen, but you're making lines as well.  Now why is that?  We're drawing the pixel by changing the values in VRAM.  If you only want to see the pixel, then we need to keep track of the previous value in a location in VRAM had prior to drawing a red pixel, then changing it to that value when the pixel moves away from that location.  But this is actually pretty cool since we basically just created a very simple Etch-A-Sketch.  \par
+\par
+\par
+}
+ 
